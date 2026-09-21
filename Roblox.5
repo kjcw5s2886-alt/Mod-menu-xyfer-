@@ -1,0 +1,192 @@
+-- ServerScriptService > GUIConfigServer
+
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local store = DataStoreService:GetDataStore("ControlPanel_Config_V1")
+
+-- Create remotes
+local folder = ReplicatedStorage:FindFirstChild("ControlPanelRemotes")
+
+if not folder then
+	folder = Instance.new("Folder")
+	folder.Name = "ControlPanelRemotes"
+	folder.Parent = ReplicatedStorage
+end
+
+local loadFunction = folder:FindFirstChild("LoadConfig")
+
+if not loadFunction then
+	loadFunction = Instance.new("RemoteFunction")
+	loadFunction.Name = "LoadConfig"
+	loadFunction.Parent = folder
+end
+
+local saveEvent = folder:FindFirstChild("SaveConfig")
+
+if not saveEvent then
+	saveEvent = Instance.new("RemoteEvent")
+	saveEvent.Name = "SaveConfig"
+	saveEvent.Parent = folder
+end
+
+local DEFAULT = {
+	Draggable = true,
+
+	Visual = false,
+
+	WalkSpeed = 16,
+	JumpPower = 50,
+
+	OP = false,
+
+	WindowX = 300,
+	WindowY = 200,
+}
+
+local sessionData = {}
+
+local function copyTable(t)
+	local result = {}
+
+	for k, v in pairs(t) do
+		result[k] = v
+	end
+
+	return result
+end
+
+local function validate(data)
+	local result = copyTable(DEFAULT)
+
+	if typeof(data) ~= "table" then
+		return result
+	end
+
+	if typeof(data.Draggable) == "boolean" then
+		result.Draggable = data.Draggable
+	end
+
+	if typeof(data.Visual) == "boolean" then
+		result.Visual = data.Visual
+	end
+
+	if typeof(data.OP) == "boolean" then
+		result.OP = data.OP
+	end
+
+	if typeof(data.WalkSpeed) == "number" then
+		result.WalkSpeed = math.clamp(data.WalkSpeed, 8, 50)
+	end
+
+	if typeof(data.JumpPower) == "number" then
+		result.JumpPower = math.clamp(data.JumpPower, 25, 100)
+	end
+
+	if typeof(data.WindowX) == "number" then
+		result.WindowX = math.clamp(data.WindowX, -5000, 5000)
+	end
+
+	if typeof(data.WindowY) == "number" then
+		result.WindowY = math.clamp(data.WindowY, -5000, 5000)
+	end
+
+	return result
+end
+
+local function applyCharacterSettings(player)
+	local config = sessionData[player.UserId]
+
+	if not config then
+		return
+	end
+
+	local character = player.Character
+
+	if not character then
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+	if not humanoid then
+		return
+	end
+
+	if config.OP then
+		humanoid.WalkSpeed = 32
+		humanoid.JumpPower = 80
+		humanoid.MaxHealth = 200
+		humanoid.Health = humanoid.MaxHealth
+	else
+		humanoid.WalkSpeed = config.WalkSpeed
+		humanoid.JumpPower = config.JumpPower
+		humanoid.MaxHealth = 100
+
+		if humanoid.Health > humanoid.MaxHealth then
+			humanoid.Health = humanoid.MaxHealth
+		end
+	end
+end
+
+loadFunction.OnServerInvoke = function(player)
+	if sessionData[player.UserId] then
+		return copyTable(sessionData[player.UserId])
+	end
+
+	local config = copyTable(DEFAULT)
+
+	local success, saved = pcall(function()
+		return store:GetAsync("Player_" .. player.UserId)
+	end)
+
+	if success and saved then
+		config = validate(saved)
+
+		print("[ControlPanel] Loaded permanent config for", player.Name)
+	elseif not success then
+		warn("[ControlPanel] DataStore unavailable.")
+		warn("[ControlPanel] GUI will still work, but permanent saving may not.")
+	end
+
+	sessionData[player.UserId] = config
+
+	task.defer(function()
+		applyCharacterSettings(player)
+	end)
+
+	return copyTable(config)
+end
+
+saveEvent.OnServerEvent:Connect(function(player, config)
+	config = validate(config)
+
+	sessionData[player.UserId] = config
+
+	applyCharacterSettings(player)
+
+	local success, errorMessage = pcall(function()
+		store:UpdateAsync("Player_" .. player.UserId, function()
+			return config
+		end)
+	end)
+
+	if not success then
+		warn("[ControlPanel] Could not permanently save:")
+		warn(errorMessage)
+	end
+end)
+
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function()
+		task.wait(0.5)
+		applyCharacterSettings(player)
+	end)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	sessionData[player.UserId] = nil
+end)
+
+print("CONTROL PANEL SERVER LOADED")
