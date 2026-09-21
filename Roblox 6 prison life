@@ -1,0 +1,191 @@
+local Players = game:GetService("Players")
+local Teams = game:GetService("Teams")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+--------------------------------------------------
+-- ADMINS
+--------------------------------------------------
+
+local ADMIN_IDS = {
+    -- Replace this with your Roblox UserId
+    [123456789] = true,
+}
+
+local function isAdmin(player)
+    return ADMIN_IDS[player.UserId] == true
+end
+
+--------------------------------------------------
+-- TEAMS
+--------------------------------------------------
+
+local function createTeam(name, color, autoAssignable)
+    local team = Teams:FindFirstChild(name)
+
+    if not team then
+        team = Instance.new("Team")
+        team.Name = name
+        team.TeamColor = BrickColor.new(color)
+        team.AutoAssignable = autoAssignable
+        team.Parent = Teams
+    end
+
+    return team
+end
+
+local prisonerTeam = createTeam(
+    "Prisoners",
+    "Bright orange",
+    true
+)
+
+local guardTeam = createTeam(
+    "Guards",
+    "Bright blue",
+    false
+)
+
+local criminalTeam = createTeam(
+    "Criminals",
+    "Bright red",
+    false
+)
+
+--------------------------------------------------
+-- REMOTES
+--------------------------------------------------
+
+local remotes = ReplicatedStorage:FindFirstChild("PrisonRemotes")
+
+if not remotes then
+    remotes = Instance.new("Folder")
+    remotes.Name = "PrisonRemotes"
+    remotes.Parent = ReplicatedStorage
+end
+
+local movementRemote = remotes:FindFirstChild("SetMovement")
+
+if not movementRemote then
+    movementRemote = Instance.new("RemoteEvent")
+    movementRemote.Name = "SetMovement"
+    movementRemote.Parent = remotes
+end
+
+local teamRemote = remotes:FindFirstChild("SetTeam")
+
+if not teamRemote then
+    teamRemote = Instance.new("RemoteEvent")
+    teamRemote.Name = "SetTeam"
+    teamRemote.Parent = remotes
+end
+
+local healRemote = remotes:FindFirstChild("Heal")
+
+if not healRemote then
+    healRemote = Instance.new("RemoteEvent")
+    healRemote.Name = "Heal"
+    healRemote.Parent = remotes
+end
+
+--------------------------------------------------
+-- PLAYER SETUP
+--------------------------------------------------
+
+Players.PlayerAdded:Connect(function(player)
+
+    player.Team = prisonerTeam
+
+    player.CharacterAdded:Connect(function(character)
+
+        local humanoid = character:WaitForChild("Humanoid")
+
+        humanoid.WalkSpeed = 16
+        humanoid.JumpPower = 50
+
+    end)
+end)
+
+--------------------------------------------------
+-- MOVEMENT
+--------------------------------------------------
+
+movementRemote.OnServerEvent:Connect(function(
+    player,
+    walkSpeed,
+    jumpPower
+)
+
+    if not isAdmin(player) then
+        return
+    end
+
+    if typeof(walkSpeed) ~= "number"
+        or typeof(jumpPower) ~= "number" then
+        return
+    end
+
+    walkSpeed = math.clamp(walkSpeed, 8, 50)
+    jumpPower = math.clamp(jumpPower, 25, 100)
+
+    local character = player.Character
+
+    if not character then
+        return
+    end
+
+    local humanoid =
+        character:FindFirstChildOfClass("Humanoid")
+
+    if humanoid then
+        humanoid.WalkSpeed = walkSpeed
+        humanoid.JumpPower = jumpPower
+    end
+end)
+
+--------------------------------------------------
+-- TEAM SWITCHING
+--------------------------------------------------
+
+teamRemote.OnServerEvent:Connect(function(player, teamName)
+
+    if not isAdmin(player) then
+        return
+    end
+
+    local selectedTeam = Teams:FindFirstChild(teamName)
+
+    if not selectedTeam then
+        return
+    end
+
+    player.Team = selectedTeam
+    player:LoadCharacter()
+
+end)
+
+--------------------------------------------------
+-- HEAL
+--------------------------------------------------
+
+healRemote.OnServerEvent:Connect(function(player)
+
+    if not isAdmin(player) then
+        return
+    end
+
+    local character = player.Character
+
+    if not character then
+        return
+    end
+
+    local humanoid =
+        character:FindFirstChildOfClass("Humanoid")
+
+    if humanoid then
+        humanoid.Health = humanoid.MaxHealth
+    end
+
+end)
+
+print("Prison game server loaded.")
