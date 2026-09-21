@@ -1,0 +1,93 @@
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local configStore = DataStoreService:GetDataStore("PlayerGUIConfig_v1")
+
+-- RemoteFunction for loading
+local loadConfig = Instance.new("RemoteFunction")
+loadConfig.Name = "LoadGUIConfig"
+loadConfig.Parent = ReplicatedStorage
+
+-- RemoteEvent for saving
+local saveConfig = Instance.new("RemoteEvent")
+saveConfig.Name = "SaveGUIConfig"
+saveConfig.Parent = ReplicatedStorage
+
+local DEFAULT_CONFIG = {
+	Draggable = true,
+
+	VisualEnabled = false,
+
+	WalkSpeed = 16,
+	JumpPower = 50,
+
+	OPEnabled = false,
+}
+
+local function copyTable(tbl)
+	local new = {}
+
+	for key, value in pairs(tbl) do
+		new[key] = value
+	end
+
+	return new
+end
+
+local function validateConfig(config)
+	local validated = copyTable(DEFAULT_CONFIG)
+
+	if typeof(config) ~= "table" then
+		return validated
+	end
+
+	if typeof(config.Draggable) == "boolean" then
+		validated.Draggable = config.Draggable
+	end
+
+	if typeof(config.VisualEnabled) == "boolean" then
+		validated.VisualEnabled = config.VisualEnabled
+	end
+
+	if typeof(config.WalkSpeed) == "number" then
+		validated.WalkSpeed = math.clamp(config.WalkSpeed, 8, 50)
+	end
+
+	if typeof(config.JumpPower) == "number" then
+		validated.JumpPower = math.clamp(config.JumpPower, 25, 100)
+	end
+
+	if typeof(config.OPEnabled) == "boolean" then
+		validated.OPEnabled = config.OPEnabled
+	end
+
+	return validated
+end
+
+loadConfig.OnServerInvoke = function(player)
+	local success, data = pcall(function()
+		return configStore:GetAsync("Player_" .. player.UserId)
+	end)
+
+	if success and data then
+		return validateConfig(data)
+	end
+
+	return copyTable(DEFAULT_CONFIG)
+end
+
+saveConfig.OnServerEvent:Connect(function(player, config)
+	config = validateConfig(config)
+
+	local success, err = pcall(function()
+		configStore:SetAsync(
+			"Player_" .. player.UserId,
+			config
+		)
+	end)
+
+	if not success then
+		warn("Could not save config for " .. player.Name .. ": " .. tostring(err))
+	end
+end)
