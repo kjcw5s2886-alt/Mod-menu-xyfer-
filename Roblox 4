@@ -1,0 +1,276 @@
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+--------------------------------------------------
+-- CREATE REMOTES
+--------------------------------------------------
+
+local loadConfig = ReplicatedStorage:FindFirstChild("LoadGUIConfig")
+
+if not loadConfig then
+	loadConfig = Instance.new("RemoteFunction")
+	loadConfig.Name = "LoadGUIConfig"
+	loadConfig.Parent = ReplicatedStorage
+end
+
+local saveConfig = ReplicatedStorage:FindFirstChild("SaveGUIConfig")
+
+if not saveConfig then
+	saveConfig = Instance.new("RemoteEvent")
+	saveConfig.Name = "SaveGUIConfig"
+	saveConfig.Parent = ReplicatedStorage
+end
+
+--------------------------------------------------
+-- DEFAULT SETTINGS
+--------------------------------------------------
+
+local DEFAULT_CONFIG = {
+	Draggable = true,
+	VisualEnabled = false,
+	WalkSpeed = 16,
+	JumpPower = 50,
+	OPEnabled = false,
+}
+
+--------------------------------------------------
+-- TEMPORARY SESSION STORAGE
+--------------------------------------------------
+
+local sessionConfigs = {}
+
+--------------------------------------------------
+-- DATASTORE
+--------------------------------------------------
+
+local configStore
+
+local datastoreAvailable = true
+
+local success, result = pcall(function()
+	return DataStoreService:GetDataStore("GUI_CONFIG_V3")
+end)
+
+if success then
+	configStore = result
+else
+	datastoreAvailable = false
+	warn("DataStore could not initialize.")
+end
+
+--------------------------------------------------
+-- COPY CONFIG
+--------------------------------------------------
+
+local function copyConfig(config)
+
+	local newConfig = {}
+
+	for key, value in pairs(config) do
+		newConfig[key] = value
+	end
+
+	return newConfig
+end
+
+--------------------------------------------------
+-- VALIDATE CONFIG
+--------------------------------------------------
+
+local function validateConfig(config)
+
+	local validated = copyConfig(DEFAULT_CONFIG)
+
+	if typeof(config) ~= "table" then
+		return validated
+	end
+
+	if typeof(config.Draggable) == "boolean" then
+		validated.Draggable = config.Draggable
+	end
+
+	if typeof(config.VisualEnabled) == "boolean" then
+		validated.VisualEnabled = config.VisualEnabled
+	end
+
+	if typeof(config.OPEnabled) == "boolean" then
+		validated.OPEnabled = config.OPEnabled
+	end
+
+	if typeof(config.WalkSpeed) == "number" then
+		validated.WalkSpeed = math.clamp(config.WalkSpeed, 8, 50)
+	end
+
+	if typeof(config.JumpPower) == "number" then
+		validated.JumpPower = math.clamp(config.JumpPower, 25, 100)
+	end
+
+	return validated
+end
+
+--------------------------------------------------
+-- LOAD CONFIG
+--------------------------------------------------
+
+loadConfig.OnServerInvoke = function(player)
+
+	-- Use temporary copy first if it exists
+	if sessionConfigs[player.UserId] then
+		return copyConfig(sessionConfigs[player.UserId])
+	end
+
+	local default = copyConfig(DEFAULT_CONFIG)
+
+	--------------------------------------------------
+	-- DATASTORE UNAVAILABLE
+	--------------------------------------------------
+
+	if not datastoreAvailable or not configStore then
+
+		sessionConfigs[player.UserId] = default
+
+		print(
+			"[GUI] DataStore unavailable. Using session settings for",
+			player.Name
+		)
+
+		return default
+	end
+
+	--------------------------------------------------
+	-- ATTEMPT LOAD
+	--------------------------------------------------
+
+	local key = "USER_" .. player.UserId
+
+	local loadSuccess, savedData = pcall(function()
+
+		return configStore:GetAsync(key)
+
+	end)
+
+	if not loadSuccess then
+
+		warn(
+			"[GUI] Could not load permanent settings for",
+			player.Name
+		)
+
+		sessionConfigs[player.UserId] = default
+
+		return default
+	end
+
+	--------------------------------------------------
+	-- EXISTING SAVE
+	--------------------------------------------------
+
+	if savedData then
+
+		local validated =
+			validateConfig(savedData)
+
+		sessionConfigs[player.UserId] =
+			validated
+
+		print(
+			"[GUI] Loaded settings:",
+			player.Name
+		)
+
+		return copyConfig(validated)
+	end
+
+	--------------------------------------------------
+	-- FIRST TIME PLAYER
+	--------------------------------------------------
+
+	sessionConfigs[player.UserId] =
+		default
+
+	return default
+end
+
+--------------------------------------------------
+-- SAVE CONFIG
+--------------------------------------------------
+
+saveConfig.OnServerEvent:Connect(
+	function(player, config)
+
+		local validated =
+			validateConfig(config)
+
+		-- ALWAYS save to the current server session
+		sessionConfigs[player.UserId] =
+			validated
+
+		----------------------------------------------
+		-- DON'T CRASH IF DATASTORE IS UNAVAILABLE
+		----------------------------------------------
+
+		if not datastoreAvailable or not configStore then
+
+			print(
+				"[GUI] Settings stored for session:",
+				player.Name
+			)
+
+			return
+		end
+
+		----------------------------------------------
+		-- PERMANENT SAVE
+		----------------------------------------------
+
+		local key =
+			"USER_" .. player.UserId
+
+		local saveSuccess, errorMessage =
+			pcall(function()
+
+				configStore:UpdateAsync(
+					key,
+					function()
+
+						return validated
+
+					end
+				)
+
+			end)
+
+		if saveSuccess then
+
+			print(
+				"[GUI] Permanent config saved:",
+				player.Name
+			)
+
+		else
+
+			warn(
+				"[GUI] Permanent save failed:",
+				errorMessage
+			)
+
+		end
+
+	end
+)
+
+--------------------------------------------------
+-- REMOVE TEMP DATA
+--------------------------------------------------
+
+Players.PlayerRemoving:Connect(
+	function(player)
+
+		sessionConfigs[player.UserId] = nil
+
+	end
+)
+
+print("[GUI CONFIG SERVER] Loaded successfully")
